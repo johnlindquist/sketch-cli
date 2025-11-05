@@ -1,0 +1,344 @@
+#!/usr/bin/env bun
+
+import { input, select, confirm } from '@inquirer/prompts';
+import { buildPrompt, PAGE_COMPONENTS, type PageType } from './prompt-templates';
+import { TUNING_PRESETS, getTuningPromptModifier, listTuningPresets, type TuningPresetKey } from './tuning-presets';
+import { PLATFORM_PRESETS, getPlatformPromptModifier, listPlatformPresets, type PlatformPresetKey } from './platform-presets';
+
+interface SketchOptions {
+  websiteType: string;
+  pageType: PageType;
+  execute?: boolean;
+  tuning?: string;
+  reference?: string;
+  platform?: string;
+  interactive?: boolean;
+}
+
+function showHelp() {
+  console.log(`
+🎨 Website Sketch Generator
+
+USAGE:
+  bun run sketch [options]                           # Interactive mode
+  bun run sketch <website-type> <page-type> [flags]  # Direct mode
+
+ARGUMENTS:
+  website-type    Type of website (e.g., "shoe marketplace", "gaming company", "hair salon")
+  page-type       Page to design: ${Object.keys(PAGE_COMPONENTS).join(', ')}
+
+FLAGS:
+  --execute, -e           Execute the gemini command immediately (default: show prompt only)
+  --tuning, -t <value>    Apply design tuning preset or custom direction
+  --reference, -r <path>  Path to reference image for visual inspiration
+  --platform, -p <value>  Target platform (website, mobile, tablet, watch, tv, etc.)
+  --list-tuning           List all available tuning presets
+  --list-platforms        List all available platform presets
+  --help, -h              Show this help message
+
+TUNING PRESETS:
+  creative, professional, minimal, vibrant, elegant, modern, playful, dark,
+  brutalist, luxe, tech, organic, retro, editorial, accessible
+  (use --list-tuning for descriptions)
+
+PLATFORM PRESETS:
+  website, mobile, tablet, watch, tv, desktop, pwa, kiosk, car, vr
+  (use --list-platforms for descriptions)
+
+EXAMPLES:
+  # Interactive mode (prompts for all options)
+  bun run sketch
+
+  # Generate prompt for shoe marketplace homepage
+  bun run sketch "shoe marketplace" home
+
+  # Generate with creative tuning
+  bun run sketch "gaming company" about --tuning creative --execute
+
+  # Use reference image for inspiration
+  bun run sketch "hair salon" home -r ~/Downloads/inspiration.jpg -e
+
+  # Combine tuning and reference
+  bun run sketch "pet adoption" cart -t dark -r ./mockup.png --execute
+
+  # Design for mobile platform
+  bun run sketch "fitness tracker" home -p mobile -e
+
+  # Design smartwatch interface
+  bun run sketch "meditation app" home --platform watch -t minimal --execute
+
+  # Use custom tuning direction
+  bun run sketch "tech startup" sales -t "cyberpunk aesthetic with neon colors" -e
+
+  # List available tuning presets
+  bun run sketch --list-tuning
+
+  # List available platform presets
+  bun run sketch --list-platforms
+
+AVAILABLE PAGE TYPES:
+  home      - Main landing page with hero and featured content
+  about     - Company story, team, and mission
+  product   - Individual product detail page
+  cart      - Shopping cart with items and checkout
+  contact   - Contact form and information
+  sales     - Marketing/sales landing page with conversion focus
+  blog      - Blog listing or article feed
+`);
+}
+
+function parseArgs(): SketchOptions | null {
+  const args = process.argv.slice(2);
+
+  // Check for list flags
+  if (args.includes('--list-tuning')) {
+    listTuningPresets();
+    return null;
+  }
+
+  if (args.includes('--list-platforms')) {
+    listPlatformPresets();
+    return null;
+  }
+
+  // Check for help
+  if (args.includes('--help') || args.includes('-h')) {
+    showHelp();
+    return null;
+  }
+
+  // Interactive mode if no args
+  if (args.length === 0) {
+    return { websiteType: '', pageType: 'home', interactive: true };
+  }
+
+  // Parse flags
+  const execute = args.includes('--execute') || args.includes('-e');
+
+  let tuning: string | undefined;
+  const tuningIndex = args.findIndex(arg => arg === '--tuning' || arg === '-t');
+  if (tuningIndex !== -1 && args[tuningIndex + 1]) {
+    tuning = args[tuningIndex + 1];
+  }
+
+  let reference: string | undefined;
+  const referenceIndex = args.findIndex(arg => arg === '--reference' || arg === '-r');
+  if (referenceIndex !== -1 && args[referenceIndex + 1]) {
+    reference = args[referenceIndex + 1];
+  }
+
+  let platform: string | undefined;
+  const platformIndex = args.findIndex(arg => arg === '--platform' || arg === '-p');
+  if (platformIndex !== -1 && args[platformIndex + 1]) {
+    platform = args[platformIndex + 1];
+  }
+
+  // Filter out flags to get positional arguments
+  const positionalArgs = args.filter(arg =>
+    !arg.startsWith('-') &&
+    arg !== tuning &&
+    arg !== reference &&
+    arg !== platform
+  );
+
+  if (positionalArgs.length < 2) {
+    console.error('❌ Error: Both website-type and page-type are required\n');
+    showHelp();
+    return null;
+  }
+
+  const websiteType = positionalArgs[0];
+  const pageType = positionalArgs[1] as PageType;
+
+  if (!Object.keys(PAGE_COMPONENTS).includes(pageType)) {
+    console.error(`❌ Error: Invalid page type "${pageType}"`);
+    console.error(`   Valid options: ${Object.keys(PAGE_COMPONENTS).join(', ')}\n`);
+    return null;
+  }
+
+  return { websiteType, pageType, execute, tuning, reference, platform };
+}
+
+
+async function interactiveMode(): Promise<SketchOptions> {
+  console.log('\n🎨 Website Sketch Generator - Interactive Mode\n');
+
+  // Get website type
+  const websiteType = await input({
+    message: 'What type of website?',
+    default: 'shoe marketplace',
+  });
+
+  // Get page type
+  const pageTypeChoices = [
+    ...Object.entries(PAGE_COMPONENTS).map(([key, value]) => ({
+      name: `${value.name} (${key})`,
+      value: key,
+    })),
+    { name: 'Custom (enter your own)', value: '__custom__' },
+  ];
+
+  let pageType: PageType = await select({
+    message: 'Select page type:',
+    choices: pageTypeChoices,
+  }) as PageType;
+
+  if (pageType === '__custom__' as any) {
+    console.log('\n⚠️  Custom page types will use homepage structure as base.');
+    pageType = 'home';
+  }
+
+  // Get tuning preference
+  const tuningChoices = [
+    { name: 'None (use default variety)', value: 'none' },
+    ...Object.entries(TUNING_PRESETS).map(([key, preset]) => ({
+      name: `${preset.name} - ${preset.description}`,
+      value: key,
+    })),
+    { name: 'Custom (enter your own)', value: '__custom__' },
+  ];
+
+  const tuningSelection = await select({
+    message: 'Select design tuning:',
+    choices: tuningChoices,
+  });
+
+  let tuning: string | undefined;
+  if (tuningSelection === '__custom__') {
+    tuning = await input({
+      message: 'Enter custom tuning direction:',
+    });
+  } else if (tuningSelection !== 'none') {
+    tuning = tuningSelection;
+  }
+
+  // Get platform
+  const platformChoices = [
+    { name: 'Desktop Website (default)', value: 'none' },
+    ...Object.entries(PLATFORM_PRESETS).map(([key, preset]) => ({
+      name: `${preset.name} - ${preset.description}`,
+      value: key,
+    })),
+    { name: 'Custom (enter your own)', value: '__custom__' },
+  ];
+
+  const platformSelection = await select({
+    message: 'Select target platform:',
+    choices: platformChoices,
+  });
+
+  let platform: string | undefined;
+  if (platformSelection === '__custom__') {
+    platform = await input({
+      message: 'Enter custom platform description:',
+    });
+  } else if (platformSelection !== 'none') {
+    platform = platformSelection;
+  }
+
+  // Get reference image
+  const reference = await input({
+    message: 'Reference image path (optional):',
+    required: false,
+  });
+
+  // Execute?
+  const execute = await confirm({
+    message: 'Execute gemini command immediately?',
+    default: false,
+  });
+
+  return {
+    websiteType,
+    pageType,
+    execute,
+    tuning,
+    reference: reference || undefined,
+    platform,
+  };
+}
+
+async function executeGeminiCommand(prompt: string): Promise<void> {
+  const proc = Bun.spawn(['gemini', '--yolo', prompt], {
+    stdout: 'inherit',
+    stderr: 'inherit',
+    stdin: 'inherit',
+  });
+
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0) {
+    console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
+    process.exit(exitCode);
+  }
+}
+
+async function main() {
+  const parsedOptions = parseArgs();
+
+  if (!parsedOptions) {
+    process.exit(0);
+  }
+
+  const options = parsedOptions.interactive
+    ? await interactiveMode()
+    : parsedOptions;
+
+  const { websiteType, pageType, execute, tuning, reference, platform } = options;
+
+  // Get modifiers if specified
+  const tuningModifier = tuning ? getTuningPromptModifier(tuning) : undefined;
+  const platformModifier = platform ? getPlatformPromptModifier(platform) : undefined;
+  const prompt = buildPrompt(websiteType, pageType, tuningModifier, reference, platformModifier);
+
+  console.log(`\n🎨 Generating sketches for: ${websiteType} - ${pageType} page`);
+  if (platform) {
+    const platformName = platform in PLATFORM_PRESETS
+      ? PLATFORM_PRESETS[platform as PlatformPresetKey].name
+      : 'Custom';
+    console.log(`📱 Platform: ${platformName}`);
+  }
+  if (tuning) {
+    const presetName = tuning in TUNING_PRESETS
+      ? TUNING_PRESETS[tuning as TuningPresetKey].name
+      : 'Custom';
+    console.log(`📐 Tuning: ${presetName}`);
+  }
+  if (reference) {
+    console.log(`🖼️  Reference: ${reference}`);
+  }
+
+  // Show equivalent CLI command if coming from interactive mode
+  if (parsedOptions.interactive) {
+    const commandParts = ['bun run sketch', `"${websiteType}"`, pageType];
+    if (platform) commandParts.push(`--platform "${platform}"`);
+    if (tuning) commandParts.push(`--tuning "${tuning}"`);
+    if (reference) commandParts.push(`--reference "${reference}"`);
+    if (execute) commandParts.push('--execute');
+
+    console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
+  }
+
+  console.log();
+
+  if (execute) {
+    console.log('📝 Prompt:');
+    console.log('─'.repeat(80));
+    console.log(prompt);
+    console.log('─'.repeat(80));
+    console.log('\n🚀 Executing gemini command...\n');
+
+    await executeGeminiCommand(prompt);
+  } else {
+    console.log('📋 Generated prompt (use --execute to run):');
+    console.log('─'.repeat(80));
+    console.log(prompt);
+    console.log('─'.repeat(80));
+    console.log('\n💡 Tip: Add --execute or -e to run the gemini command automatically');
+  }
+}
+
+main().catch(error => {
+  console.error('❌ Fatal error:', error.message);
+  process.exit(1);
+});

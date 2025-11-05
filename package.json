@@ -1,0 +1,14 @@
+{
+  "name": "website-sketch-generator",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "sketch": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
