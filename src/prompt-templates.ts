@@ -139,12 +139,14 @@ function slugify(text: string): string {
 export function buildPrompt(
   websiteType: string,
   pageType: keyof typeof PAGE_COMPONENTS,
+  variationNumber: number,
   tuningModifier?: string,
   referenceImagePath?: string,
-  platformModifier?: string
+  platformModifier?: string,
+  paletteModifier?: string
 ): string {
   const page = PAGE_COMPONENTS[pageType];
-  const randomFormats = getRandomItems(PRESENTATION_FORMATS, 5);
+  const randomFormat = getRandomItems(PRESENTATION_FORMATS, 1)[0];
 
   const elementsList = page.elements.map(el => `  - ${el}`).join('\n');
 
@@ -157,23 +159,28 @@ export function buildPrompt(
         'Multi-column magazine-style layout',
         'Card-based modular layout system'
       ]
-    : getRandomItems(DESIGN_STYLES, 5);
+    : DESIGN_STYLES;
+
+  // Pick a specific layout approach for this variation
+  const layoutApproach = layoutApproaches[(variationNumber - 1) % layoutApproaches.length];
 
   const platformSection = platformModifier
-    ? `\n\nPLATFORM TARGET (MANDATORY - MUST BE APPLIED TO ALL 5 DESIGNS):\n${platformModifier}\n`
+    ? `\n\nPLATFORM TARGET (MANDATORY):\n${platformModifier}\n`
     : '';
 
   const tuningSection = tuningModifier
-    ? `\n\nDESIGN DIRECTION (MANDATORY - MUST BE APPLIED TO ALL 5 DESIGNS):\n${tuningModifier}\n\nAll 5 designs must follow this design direction while exploring different layout approaches and compositions within this style.\n`
+    ? `\n\nDESIGN DIRECTION (MANDATORY):\n${tuningModifier}\n\nThis design must follow this design direction.\n`
+    : '';
+
+  const paletteSection = paletteModifier
+    ? `\n\nCOLOR PALETTE (MANDATORY):\n${paletteModifier}\n\nAll colors in this design must follow the specified palette.\n`
     : '';
 
   const referenceSection = referenceImagePath
-    ? `\n\nREFERENCE IMAGE FOR INSPIRATION:\nUse this image as visual inspiration for design style, color palette, layout approach, and overall aesthetic: ${referenceImagePath}\nAdapt and remix elements from this reference while creating variations.\n`
+    ? `\n\nREFERENCE IMAGE FOR INSPIRATION:\nUse this image as visual inspiration for design style, color palette, layout approach, and overall aesthetic: ${referenceImagePath}\n`
     : '';
 
-  const varietyInstruction = tuningModifier || platformModifier
-    ? 'Create 5 different layout variations that all adhere to the specified design direction and platform requirements:'
-    : 'Create 5 completely different professional website design mockups, each with a distinct visual approach:';
+  const layoutSection = `\n\nLAYOUT APPROACH FOR THIS VARIATION:\n${layoutApproach}\n`;
 
   // Generate naming scheme
   const timestamp = generateTimestamp();
@@ -182,60 +189,40 @@ export function buildPrompt(
   const platformSlug = platformModifier ? slugify(platformModifier.split(':')[0].substring(0, 20)) : 'web';
   const tuningSlug = tuningModifier ? slugify(tuningModifier.split('.')[0].substring(0, 20)) : 'default';
 
-  const baseFilename = `${websiteSlug}_${pageSlug}_${platformSlug}_${tuningSlug}_${timestamp}`;
+  const filename = `${websiteSlug}_${pageSlug}_${platformSlug}_${tuningSlug}_${timestamp}_v${variationNumber}.png`;
 
-  const namingSection = `\n\nFILE NAMING CONVENTION:
-Save each of the 5 generated images with the following naming pattern:
-- ${baseFilename}_v1.png
-- ${baseFilename}_v2.png
-- ${baseFilename}_v3.png
-- ${baseFilename}_v4.png
-- ${baseFilename}_v5.png
+  const namingSection = `\n\nFILE NAMING:\nSave this design as: ${filename}\n`;
 
-Where:
-- "${websiteSlug}" = website/app type
-- "${pageSlug}" = page type
-- "${platformSlug}" = platform target${tuningModifier ? `\n- "${tuningSlug}" = design direction` : ''}
-- "${timestamp}" = generation timestamp (current: ${new Date().toLocaleString()})
-- "v1-v5" = variation number
-\n`;
+  // Add unique identifier to make prompt unique for Gemini's filename generation
+  const uniqueId = `${websiteSlug}_${pageSlug}_v${variationNumber}_${timestamp}`;
 
-  return `/generate ${varietyInstruction}
+  return `/generate ${uniqueId} Create ONE single, complete ${websiteType} ${page.name} design variation ${variationNumber}.
 
-TYPE: ${websiteType} ${page.name}${platformSection}${tuningSection}${referenceSection}${namingSection}
+TYPE: ${websiteType} ${page.name}${platformSection}${tuningSection}${paletteSection}${layoutSection}${referenceSection}${namingSection}
 
-REQUIRED UI ELEMENTS FOR ALL DESIGNS:
+REQUIRED UI ELEMENTS:
 ${elementsList}
 
-LAYOUT VARIATION APPROACHES (explore different structures while maintaining design direction):
-1. ${layoutApproaches[0]}
-2. ${layoutApproaches[1]}
-3. ${layoutApproaches[2]}
-4. ${layoutApproaches[3]}
-5. ${layoutApproaches[4]}
-
 PRESENTATION FORMAT:
-Each design should be rendered as:
-1. ${randomFormats[0]}
-2. ${randomFormats[1]}
-3. ${randomFormats[2]}
-4. ${randomFormats[3]}
-5. ${randomFormats[4]}
+Render this design as: ${randomFormat}
 
 CRITICAL REQUIREMENTS:
+- CREATE EXACTLY ONE COMPLETE PAGE DESIGN - not multiple pages side-by-side
+- DO NOT create comparison views, grids of variations, or multiple pages in a single image
+- This should be ONE standalone, complete page design
 - Create fully realized, professional website designs (NOT paper sketches or hand-drawn wireframes)
 - Use actual UI elements: buttons, images, typography, icons, colors, and modern web design patterns
 - Show realistic content with proper hierarchy, spacing, and visual balance
 - Include representative imagery, color schemes, and typography appropriate for a ${websiteType}
-- Each design must look like a real, production-ready website layout
-- Vary the layout structure and composition (grid-based vs. asymmetric vs. single-column vs. multi-column)
-- Display as digital mockups that could be implemented as actual websites
-- If design direction is specified, ALL 5 variations must follow that direction while exploring different layouts
-- If platform is specified, ALL 5 designs must be appropriate for that platform
-- Ensure each design is immediately recognizable as a ${websiteType} ${page.name}
-- Provide variety through different layouts and compositions, NOT by abandoning the specified design direction
+- This design must look like a real, production-ready website layout
+- Display as a digital mockup that could be implemented as an actual website
+- Ensure this design is immediately recognizable as a ${websiteType} ${page.name}
 
 DO NOT INCLUDE:
+- Multiple pages or design variations shown side-by-side in the same image
+- Comparison grids showing different design options together
+- Split-screen views with multiple page layouts
+- Before/after comparisons or design evolution sequences
 - Hand-drawn sketches, marker drawings, or pen-and-paper wireframes
 - Photographed paper with annotations or notes
 - Blueprint-style technical drawings
@@ -250,12 +237,15 @@ DO NOT INCLUDE:
 - Any browser interface elements (back/forward buttons, reload, favorites, etc.)
 
 INSTEAD, CREATE:
-- Polished, high-fidelity digital designs showing ONLY the website content
+- ONE SINGLE PAGE DESIGN - a complete, standalone page layout
+- Polished, high-fidelity digital design showing ONLY the website content
 - Full-color UI with realistic imagery and graphics
 - Professional typography and modern web design aesthetics
-- Actual website interfaces that look ready to launch
-- Clean mockups focused entirely on the website design itself
-- Direct view of the website without any browser or device framing`;
+- Actual website interface that looks ready to launch
+- Clean mockup focused entirely on the website design itself
+- Direct view of the website without any browser or device framing
+
+REMINDER: Generate exactly ONE image file containing ONE complete ${page.name} design.`;
 }
 
 function getRandomItems<T>(array: readonly T[], count: number): T[] {

@@ -4,14 +4,17 @@ import { input, select, confirm } from '@inquirer/prompts';
 import { buildPrompt, PAGE_COMPONENTS, type PageType } from './prompt-templates';
 import { TUNING_PRESETS, getTuningPromptModifier, listTuningPresets, type TuningPresetKey } from './tuning-presets';
 import { PLATFORM_PRESETS, getPlatformPromptModifier, listPlatformPresets, type PlatformPresetKey } from './platform-presets';
+import { COLOR_PALETTES, getPalettePromptModifier, listColorPalettes, type ColorPaletteKey } from './color-palettes';
 
 interface SketchOptions {
   websiteType: string;
   pageType: PageType;
-  execute?: boolean;
+  dryRun?: boolean;
   tuning?: string;
   reference?: string;
   platform?: string;
+  palette?: string;
+  count?: number;
   interactive?: boolean;
 }
 
@@ -28,11 +31,14 @@ ARGUMENTS:
   page-type       Page to design: ${Object.keys(PAGE_COMPONENTS).join(', ')}
 
 FLAGS:
-  --execute, -e           Execute the gemini command immediately (default: show prompt only)
+  --dry-run               Show generated prompts without executing (default: execute immediately)
+  --count, -c <number>    Number of design variations to generate (default: 5)
   --tuning, -t <value>    Apply design tuning preset or custom direction
+  --palette <value>       Apply color palette (dracula, monokai, nord, github-dark, etc.)
   --reference, -r <path>  Path to reference image for visual inspiration
   --platform, -p <value>  Target platform (website, mobile, tablet, watch, tv, etc.)
   --list-tuning           List all available tuning presets
+  --list-palettes         List all available color palettes
   --list-platforms        List all available platform presets
   --help, -h              Show this help message
 
@@ -40,6 +46,11 @@ TUNING PRESETS:
   creative, professional, minimal, vibrant, elegant, modern, playful, dark,
   brutalist, luxe, tech, organic, retro, editorial, accessible
   (use --list-tuning for descriptions)
+
+COLOR PALETTES:
+  dracula, monokai, one-dark, nord, github-dark, synthwave, tokyo-night,
+  gruvbox-dark, solarized-dark, material, catppuccin-mocha, and more
+  (use --list-palettes for all options and descriptions)
 
 PLATFORM PRESETS:
   website, mobile, tablet, watch, tv, desktop, pwa, kiosk, car, vr
@@ -49,29 +60,47 @@ EXAMPLES:
   # Interactive mode (prompts for all options)
   bun run sketch
 
-  # Generate prompt for shoe marketplace homepage
+  # Generate and execute shoe marketplace homepage (executes by default)
   bun run sketch "shoe marketplace" home
 
+  # Preview prompts without executing
+  bun run sketch "gaming company" about --dry-run
+
   # Generate with creative tuning
-  bun run sketch "gaming company" about --tuning creative --execute
+  bun run sketch "gaming company" about --tuning creative
 
   # Use reference image for inspiration
-  bun run sketch "hair salon" home -r ~/Downloads/inspiration.jpg -e
+  bun run sketch "hair salon" home -r ~/Downloads/inspiration.jpg
 
   # Combine tuning and reference
-  bun run sketch "pet adoption" cart -t dark -r ./mockup.png --execute
+  bun run sketch "pet adoption" cart -t dark -r ./mockup.png
 
   # Design for mobile platform
-  bun run sketch "fitness tracker" home -p mobile -e
+  bun run sketch "fitness tracker" home -p mobile
 
   # Design smartwatch interface
-  bun run sketch "meditation app" home --platform watch -t minimal --execute
+  bun run sketch "meditation app" home --platform watch -t minimal
+
+  # Generate 10 variations instead of 5
+  bun run sketch "hair salon" home --count 10
+
+  # Use Dracula color palette
+  bun run sketch "developer tools" home --palette dracula
+
+  # Combine palette with tuning
+  bun run sketch "crypto exchange" product --palette tokyo-night --tuning tech
+
+  # Use custom color palette
+  bun run sketch "art gallery" home --palette "deep burgundy #8B0000, gold #FFD700, cream #FFFDD0"
 
   # Use custom tuning direction
-  bun run sketch "tech startup" sales -t "cyberpunk aesthetic with neon colors" -e
+  bun run sketch "tech startup" sales -t "cyberpunk aesthetic with neon colors"
 
   # List available tuning presets
   bun run sketch --list-tuning
+
+  # List available color palettes
+  bun run sketch --list-palettes
 
   # List available platform presets
   bun run sketch --list-platforms
@@ -96,6 +125,11 @@ function parseArgs(): SketchOptions | null {
     return null;
   }
 
+  if (args.includes('--list-palettes')) {
+    listColorPalettes();
+    return null;
+  }
+
   if (args.includes('--list-platforms')) {
     listPlatformPresets();
     return null;
@@ -113,7 +147,7 @@ function parseArgs(): SketchOptions | null {
   }
 
   // Parse flags
-  const execute = args.includes('--execute') || args.includes('-e');
+  const dryRun = args.includes('--dry-run');
 
   let tuning: string | undefined;
   const tuningIndex = args.findIndex(arg => arg === '--tuning' || arg === '-t');
@@ -133,12 +167,31 @@ function parseArgs(): SketchOptions | null {
     platform = args[platformIndex + 1];
   }
 
+  let palette: string | undefined;
+  const paletteIndex = args.findIndex(arg => arg === '--palette');
+  if (paletteIndex !== -1 && args[paletteIndex + 1]) {
+    palette = args[paletteIndex + 1];
+  }
+
+  let count: number | undefined;
+  const countIndex = args.findIndex(arg => arg === '--count' || arg === '-c');
+  if (countIndex !== -1 && args[countIndex + 1]) {
+    const parsedCount = parseInt(args[countIndex + 1], 10);
+    if (isNaN(parsedCount) || parsedCount < 1) {
+      console.error('❌ Error: --count must be a positive integer\n');
+      return null;
+    }
+    count = parsedCount;
+  }
+
   // Filter out flags to get positional arguments
   const positionalArgs = args.filter(arg =>
     !arg.startsWith('-') &&
     arg !== tuning &&
     arg !== reference &&
-    arg !== platform
+    arg !== platform &&
+    arg !== palette &&
+    arg !== (count?.toString())
   );
 
   if (positionalArgs.length < 2) {
@@ -156,7 +209,7 @@ function parseArgs(): SketchOptions | null {
     return null;
   }
 
-  return { websiteType, pageType, execute, tuning, reference, platform };
+  return { websiteType, pageType, dryRun, tuning, reference, platform, palette, count };
 }
 
 
@@ -236,25 +289,57 @@ async function interactiveMode(): Promise<SketchOptions> {
     platform = platformSelection;
   }
 
+  // Get color palette
+  const paletteChoices = [
+    { name: 'None (use default colors)', value: 'none' },
+    ...Object.entries(COLOR_PALETTES).map(([key, preset]) => ({
+      name: `${preset.name} - ${preset.description}`,
+      value: key,
+    })),
+    { name: 'Custom (enter your own)', value: '__custom__' },
+  ];
+
+  const paletteSelection = await select({
+    message: 'Select color palette:',
+    choices: paletteChoices,
+  });
+
+  let palette: string | undefined;
+  if (paletteSelection === '__custom__') {
+    palette = await input({
+      message: 'Enter custom color palette (e.g., "red #FF0000, blue #0000FF"):',
+    });
+  } else if (paletteSelection !== 'none') {
+    palette = paletteSelection;
+  }
+
   // Get reference image
   const reference = await input({
     message: 'Reference image path (optional):',
-    required: false,
   });
 
-  // Execute?
-  const execute = await confirm({
-    message: 'Execute gemini command immediately?',
+  // Get count
+  const countInput = await input({
+    message: 'Number of variations to generate:',
+    default: '5',
+  });
+  const count = parseInt(countInput, 10);
+
+  // Dry run?
+  const dryRun = await confirm({
+    message: 'Dry run only (show prompts without executing)?',
     default: false,
   });
 
   return {
     websiteType,
     pageType,
-    execute,
+    dryRun,
     tuning,
     reference: reference || undefined,
     platform,
+    palette,
+    count,
   };
 }
 
@@ -284,14 +369,15 @@ async function main() {
     ? await interactiveMode()
     : parsedOptions;
 
-  const { websiteType, pageType, execute, tuning, reference, platform } = options;
+  const { websiteType, pageType, dryRun, tuning, reference, platform, palette, count } = options;
 
   // Get modifiers if specified
   const tuningModifier = tuning ? getTuningPromptModifier(tuning) : undefined;
   const platformModifier = platform ? getPlatformPromptModifier(platform) : undefined;
-  const prompt = buildPrompt(websiteType, pageType, tuningModifier, reference, platformModifier);
+  const paletteModifier = palette ? getPalettePromptModifier(palette) : undefined;
+  const variationCount = count || 5;
 
-  console.log(`\n🎨 Generating sketches for: ${websiteType} - ${pageType} page`);
+  console.log(`\n🎨 Generating ${variationCount} design variation${variationCount > 1 ? 's' : ''} for: ${websiteType} - ${pageType} page`);
   if (platform) {
     const platformName = platform in PLATFORM_PRESETS
       ? PLATFORM_PRESETS[platform as PlatformPresetKey].name
@@ -304,6 +390,12 @@ async function main() {
       : 'Custom';
     console.log(`📐 Tuning: ${presetName}`);
   }
+  if (palette) {
+    const paletteName = palette in COLOR_PALETTES
+      ? COLOR_PALETTES[palette as ColorPaletteKey].name
+      : 'Custom';
+    console.log(`🎨 Palette: ${paletteName}`);
+  }
   if (reference) {
     console.log(`🖼️  Reference: ${reference}`);
   }
@@ -313,28 +405,51 @@ async function main() {
     const commandParts = ['bun run sketch', `"${websiteType}"`, pageType];
     if (platform) commandParts.push(`--platform "${platform}"`);
     if (tuning) commandParts.push(`--tuning "${tuning}"`);
+    if (palette) commandParts.push(`--palette "${palette}"`);
     if (reference) commandParts.push(`--reference "${reference}"`);
-    if (execute) commandParts.push('--execute');
+    if (count) commandParts.push(`--count ${count}`);
+    if (dryRun) commandParts.push('--dry-run');
 
     console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
   }
 
   console.log();
 
-  if (execute) {
-    console.log('📝 Prompt:');
-    console.log('─'.repeat(80));
-    console.log(prompt);
-    console.log('─'.repeat(80));
-    console.log('\n🚀 Executing gemini command...\n');
+  if (dryRun) {
+    console.log('📋 Generated prompts (dry run - not executing):\n');
 
-    await executeGeminiCommand(prompt);
+    for (let i = 1; i <= variationCount; i++) {
+      const prompt = buildPrompt(websiteType, pageType, i, tuningModifier, reference, platformModifier, paletteModifier);
+
+      console.log(`${'─'.repeat(80)}`);
+      console.log(`Variation ${i}/${variationCount}:`);
+      console.log(`${'─'.repeat(80)}`);
+      console.log(prompt);
+      console.log(`${'─'.repeat(80)}\n`);
+    }
+
+    console.log('💡 Tip: Remove --dry-run to execute the gemini command automatically');
   } else {
-    console.log('📋 Generated prompt (use --execute to run):');
-    console.log('─'.repeat(80));
-    console.log(prompt);
-    console.log('─'.repeat(80));
-    console.log('\n💡 Tip: Add --execute or -e to run the gemini command automatically');
+    console.log('🚀 Generating designs...\n');
+
+    for (let i = 1; i <= variationCount; i++) {
+      const prompt = buildPrompt(websiteType, pageType, i, tuningModifier, reference, platformModifier, paletteModifier);
+
+      console.log(`${'─'.repeat(80)}`);
+      console.log(`📝 Variation ${i}/${variationCount} Prompt:`);
+      console.log(`${'─'.repeat(80)}`);
+      console.log(prompt);
+      console.log(`${'─'.repeat(80)}\n`);
+
+      console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
+      await executeGeminiCommand(prompt);
+
+      if (i < variationCount) {
+        console.log(`\n✅ Variation ${i} complete! Moving to next variation...\n`);
+      }
+    }
+
+    console.log(`\n✨ All ${variationCount} variations generated successfully!`);
   }
 }
 

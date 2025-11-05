@@ -1,14 +1,16 @@
 # Website Sketch Generator 🎨
 
-A CLI tool for generating diverse, hand-drawn style website design sketches using AI. Creates 5 completely different design variations for any website type and page combination.
+A CLI tool for generating diverse, professional website design mockups using AI. Generates multiple distinct design variations by calling Gemini separately for each variation with unique prompts and specifications.
 
 ## Features
 
 - **Flexible Website Types**: Works with any website concept (e-commerce, SaaS, portfolio, etc.)
 - **Multiple Page Templates**: Home, About, Product, Cart, Contact, Sales, Blog
-- **Design Variety**: Each generation creates 5 distinct design styles and approaches
+- **20+ Color Palettes**: Developer-familiar themes (Dracula, Nord, Tokyo Night, GitHub, Material, etc.)
+- **Design Variety**: Generates multiple distinct design variations (default: 5, customizable)
+- **Sequential Generation**: Calls Gemini separately for each variation with unique layout approaches
 - **Professional Elements**: Includes all essential page components and UI elements
-- **Hand-Drawn Aesthetic**: Generates realistic marker sketch wireframes
+- **Execute by Default**: Generates immediately unless `--dry-run` is specified
 
 ## Installation
 
@@ -21,26 +23,32 @@ bun install
 ### Basic Command Structure
 
 ```bash
-bun run sketch <website-type> <page-type> [--execute]
+bun run sketch <website-type> <page-type> [options]
 ```
 
 ### Examples
 
 ```bash
-# Preview prompt for shoe marketplace homepage
+# Generate shoe marketplace homepage (executes by default, 5 variations)
 bun run sketch "shoe marketplace" home
 
-# Generate and execute gaming company about page
-bun run sketch "gaming company" about --execute
+# Preview prompts without executing
+bun run sketch "gaming company" about --dry-run
 
-# Create cart page for pet adoption site
-bun run sketch "pet adoption" cart -e
+# Create 10 variations for pet adoption cart page
+bun run sketch "pet adoption" cart --count 10
 
-# Sales page for SaaS product
-bun run sketch "project management software" sales --execute
+# Use Dracula color palette
+bun run sketch "developer tools" home --palette dracula
 
-# Blog listing for cooking website
-bun run sketch "recipe sharing" blog -e
+# Combine palette, tuning, and platform
+bun run sketch "crypto exchange" product --palette tokyo-night --tuning tech --platform mobile
+
+# Use custom color palette
+bun run sketch "art gallery" home --palette "burgundy #8B0000, gold #FFD700, cream #FFFDD0"
+
+# Single variation for quick testing
+bun run sketch "recipe sharing" blog --count 1
 ```
 
 ## Available Page Types
@@ -58,22 +66,49 @@ bun run sketch "recipe sharing" blog -e
 ## How It Works
 
 1. **Dynamic Prompt Generation**: Combines website type with page-specific components
-2. **Style Randomization**: Selects 5 different design approaches (minimalist, bold, elegant, etc.)
-3. **Variation Techniques**: Applies different sketch styles (wireframe, rough sketch, blueprint, etc.)
-4. **Gemini Integration**: Passes the constructed prompt to `gemini --yolo` for image generation
+2. **Sequential Variation**: Generates each design separately with unique layout approaches
+3. **Layout Cycling**: Rotates through design styles (minimalist, bold, elegant, grid-based, asymmetric, etc.)
+4. **Color Palette Application**: Applies developer-familiar color schemes (VS Code themes, GitHub, Material Design)
+5. **Multiple Gemini Calls**: Calls `gemini --yolo` separately for each variation to ensure distinct designs
+6. **Unique Filenames**: Each variation gets a unique filename with timestamp and variation number
 
-## Design Styles Included
+## Color Palettes
 
-- Minimalist with whitespace
-- Bold and modern
-- Elegant and sophisticated
-- Playful and energetic
-- Professional corporate
-- Editorial magazine-style
-- Tech-forward with gradients
-- Organic and natural
-- Retro-inspired
-- Experimental and artistic
+By default, no color palette is applied (AI chooses colors naturally). You can optionally specify a palette:
+
+**VS Code Themes:**
+- Dracula, Monokai, One Dark, Nord, Tokyo Night
+- Night Owl, Cobalt2, Synthwave '84, Palenight
+- Ayu Dark, Shades of Purple, Catppuccin Mocha, Rosé Pine
+- Solarized Dark/Light, Gruvbox Dark/Light
+
+**GitHub & Material:**
+- GitHub Dark, GitHub Light
+- Material Design
+
+**Custom Palettes:**
+Provide your own color scheme with hex codes
+
+View all palettes with descriptions:
+```bash
+bun run sketch --list-palettes
+```
+
+## Design Styles (Tuning Presets)
+
+- Creative & Artistic, Professional & Corporate
+- Minimalist & Clean, Vibrant & Energetic
+- Elegant & Sophisticated, Modern & Trendy
+- Playful & Fun, Dark Mode Focused
+- Brutalist & Raw, Luxury & Premium
+- Tech & Futuristic, Organic & Natural
+- Retro & Vintage, Editorial & Magazine-Style
+- Accessibility Focused
+
+View all tuning presets with descriptions:
+```bash
+bun run sketch --list-tuning
+```
 
 ## Customization
 
@@ -119,12 +154,26 @@ export const DESIGN_STYLES = [
 └── README.md
 ```
 
+## Command-Line Options
+
+- `--dry-run` - Preview prompts without executing (default: executes immediately)
+- `--count, -c <number>` - Number of variations (default: 5)
+- `--tuning, -t <preset>` - Design tuning preset or custom direction
+- `--palette <preset>` - Color palette (omit for AI-chosen colors)
+- `--platform, -p <preset>` - Target platform (website, mobile, tablet, etc.)
+- `--reference, -r <path>` - Reference image for visual inspiration
+- `--list-tuning` - List all tuning presets
+- `--list-palettes` - List all color palettes
+- `--list-platforms` - List all platform presets
+
 ## Tips
 
 - Use quotes around website types with spaces: `"hair salon"`
-- Add `--execute` to automatically run the gemini command
-- Without `--execute`, the tool just shows the generated prompt
-- Each run randomizes the 5 design variations for fresh results
+- Executes immediately by default - use `--dry-run` to preview prompts first
+- Use `--count` to control how many variations to generate (default: 5)
+- Each variation gets a different layout approach for true variety
+- Lower count (1-3) for quick testing, higher count (10+) for extensive exploration
+- Omit `--palette` to let AI choose colors naturally
 
 ## License
 
