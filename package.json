@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "sketch": "bun run src/index.ts"
+    "sketch": "bun run src/index.ts",
+    "component": "bun run src/component.ts"
   },
   "dependencies": {
     "@inquirer/prompts": "^3.3.0"
