@@ -1,11 +1,24 @@
 {
-  "name": "website-sketch-generator",
+  "name": "sketch-cli",
   "version": "1.0.0",
+  "description": "AI-powered design mockup and component variation generator",
   "type": "module",
   "scripts": {
     "sketch": "bun run src/index.ts",
     "component": "bun run src/component.ts"
   },
+  "keywords": [
+    "design",
+    "mockup",
+    "sketch",
+    "component",
+    "variation",
+    "ai",
+    "generator",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
   "dependencies": {
     "@inquirer/prompts": "^3.3.0"
   },

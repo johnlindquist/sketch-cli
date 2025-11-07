@@ -1,16 +1,16 @@
-# Website Sketch Generator 🎨
+# sketch-cli
 
-A CLI tool for generating diverse, professional website design mockups using AI. Generates multiple distinct design variations by calling Gemini separately for each variation with unique prompts and specifications.
+AI-powered design mockup and component variation generator. Generate multiple design variations of website pages and UI components using AI image generation.
 
 ## Features
 
-- **Flexible Website Types**: Works with any website concept (e-commerce, SaaS, portfolio, etc.)
-- **Multiple Page Templates**: Home, About, Product, Cart, Contact, Sales, Blog
-- **20+ Color Palettes**: Developer-familiar themes (Dracula, Nord, Tokyo Night, GitHub, Material, etc.)
-- **Design Variety**: Generates multiple distinct design variations (default: 5, customizable)
-- **Sequential Generation**: Calls Gemini separately for each variation with unique layout approaches
-- **Professional Elements**: Includes all essential page components and UI elements
-- **Execute by Default**: Generates immediately unless `--dry-run` is specified
+- **Website Page Generation**: Create complete page designs (home, about, product, cart, contact, sales, blog)
+- **Component Variations**: Generate design variations of individual UI components
+- **Design Presets**: Apply curated design styles (Material, iOS, glassmorphism, neumorphism, etc.)
+- **Color Palettes**: Use popular color schemes (Dracula, Nord, Tokyo Night, Monokai, etc.)
+- **Platform Targeting**: Design for different platforms (web, mobile, tablet, watch, TV, etc.)
+- **Reference Images**: Use existing designs as visual inspiration
+- **Interactive & CLI Modes**: Choose between guided prompts or direct command execution
 
 ## Installation
 
@@ -20,160 +20,202 @@ bun install
 
 ## Usage
 
-### Basic Command Structure
+### Website Page Generation
+
+Generate complete website page designs:
 
 ```bash
-bun run sketch <website-type> <page-type> [options]
-```
+# Interactive mode
+bun run sketch
 
-### Examples
-
-```bash
-# Generate shoe marketplace homepage (executes by default, 5 variations)
+# Direct mode - generates 5 variations by default
 bun run sketch "shoe marketplace" home
 
-# Preview prompts without executing
-bun run sketch "gaming company" about --dry-run
+# With design tuning
+bun run sketch "gaming company" about --tuning creative
 
-# Create 10 variations for pet adoption cart page
+# With color palette
+bun run sketch "crypto exchange" product --palette tokyo-night
+
+# Target specific platform
+bun run sketch "fitness tracker" home --platform mobile
+
+# Use reference image for inspiration
+bun run sketch "hair salon" home --reference ~/inspiration.jpg
+
+# Generate more variations
 bun run sketch "pet adoption" cart --count 10
 
-# Use Dracula color palette
-bun run sketch "developer tools" home --palette dracula
-
-# Combine palette, tuning, and platform
-bun run sketch "crypto exchange" product --palette tokyo-night --tuning tech --platform mobile
-
-# Use custom color palette
-bun run sketch "art gallery" home --palette "burgundy #8B0000, gold #FFD700, cream #FFFDD0"
-
-# Single variation for quick testing
-bun run sketch "recipe sharing" blog --count 1
+# Preview prompts without executing
+bun run sketch "tech startup" sales --dry-run
 ```
 
-## Available Page Types
+### Component Variations
 
-| Page Type | Description |
-|-----------|-------------|
-| `home` | Main landing page with hero section, featured content, and CTAs |
-| `about` | Company story, team profiles, mission, and values |
-| `product` | Product detail with images, specs, pricing, and reviews |
-| `cart` | Shopping cart with items, pricing breakdown, and checkout |
-| `contact` | Contact form, location map, and contact information |
-| `sales` | Marketing landing page with conversion-focused elements |
-| `blog` | Blog listing with article cards and sidebar |
+Generate design variations of UI components:
+
+```bash
+# Interactive mode
+bun run component
+
+# Generate variations from a component image
+bun run component ./button.png
+
+# Specify component type
+bun run component ./widget.png --type button
+
+# Apply design style
+bun run component ./card.png --style material
+
+# Apply color palette
+bun run component ./form.png --palette dracula
+
+# Combine style and palette
+bun run component ./modal.png --style glassmorphism --palette nord
+
+# Generate 10 variations
+bun run component ./nav.png --count 10
+
+# Preview without executing
+bun run component ./button.png --style ios --dry-run
+```
+
+## Available Options
+
+### Page Types
+- `home` - Main landing page with hero and featured content
+- `about` - Company story, team, and mission
+- `product` - Individual product detail page
+- `cart` - Shopping cart with items and checkout
+- `contact` - Contact form and information
+- `sales` - Marketing/sales landing page with conversion focus
+- `blog` - Blog listing or article feed
+
+### Component Types
+- `button`, `card`, `form`, `nav`, `modal`, `table`, `list`
+- `header`, `footer`, `badge`, `icon`, `dropdown`, `toggle`
+- `toast`, `avatar`
+
+### Design Tuning Presets
+- `creative` - Experimental layouts, bold colors
+- `professional` - Clean, trustworthy, business-focused
+- `minimal` - Maximum whitespace, simple typography
+- `vibrant` - Bold colors, dynamic layouts
+- `elegant` - Refined typography, luxury feel
+- `modern` - Latest design trends
+- `playful` - Friendly, approachable
+- `dark` - Dark mode focused
+- `brutalist` - Raw, unconventional
+- And more... (use `--list-tuning` to see all)
+
+### Component Style Presets
+- `material` - Google Material Design
+- `ios` - Apple iOS/HIG style
+- `glassmorphism` - Frosted glass effects
+- `neumorphism` - Soft UI with shadows
+- `minimal` - Ultra-clean simplicity
+- `bold` - High contrast, vibrant
+- And more... (use `--list-styles` to see all)
+
+### Color Palettes
+- VS Code themes: `dracula`, `monokai`, `one-dark`, `nord`, `tokyo-night`, `synthwave`
+- GitHub themes: `github-dark`, `github-light`
+- Retro themes: `gruvbox-dark`, `gruvbox-light`
+- And more... (use `--list-palettes` to see all)
+
+### Platform Presets
+- `website` - Desktop website design
+- `mobile` - Native mobile app interface
+- `tablet` - Tablet application
+- `watch` - Smartwatch/wearable
+- `tv` - Smart TV/streaming interface
+- And more... (use `--list-platforms` to see all)
+
+## Command Reference
+
+### Website Generator
+```bash
+bun run sketch [website-type] [page-type] [options]
+
+Options:
+  --dry-run               Show prompts without executing
+  --count, -c <number>    Number of variations (default: 5)
+  --tuning, -t <value>    Design tuning preset
+  --palette <value>       Color palette
+  --reference, -r <path>  Reference image path
+  --platform, -p <value>  Target platform
+  --list-tuning           List all tuning presets
+  --list-palettes         List all color palettes
+  --list-platforms        List all platforms
+  --help, -h              Show help
+```
+
+### Component Generator
+```bash
+bun run component [image-path] [options]
+
+Options:
+  --dry-run               Show prompts without executing
+  --count, -c <number>    Number of variations (default: 5)
+  --type, -t <value>      Component type
+  --description <text>    Custom description
+  --style, -s <value>     Variation style preset
+  --palette <value>       Color palette
+  --list-styles           List all style presets
+  --list-types            List all component types
+  --list-palettes         List all color palettes
+  --help, -h              Show help
+```
 
 ## How It Works
 
-1. **Dynamic Prompt Generation**: Combines website type with page-specific components
-2. **Sequential Variation**: Generates each design separately with unique layout approaches
-3. **Layout Cycling**: Rotates through design styles (minimalist, bold, elegant, grid-based, asymmetric, etc.)
-4. **Color Palette Application**: Applies developer-familiar color schemes (VS Code themes, GitHub, Material Design)
-5. **Multiple Gemini Calls**: Calls `gemini --yolo` separately for each variation to ensure distinct designs
-6. **Unique Filenames**: Each variation gets a unique filename with timestamp and variation number
+1. You provide website type, page type, or component image
+2. Choose design direction, style presets, and color palettes
+3. The tool generates detailed AI prompts
+4. Multiple design variations are created automatically
+5. Each variation explores different visual approaches while maintaining functionality
 
-## Color Palettes
+## Examples
 
-By default, no color palette is applied (AI chooses colors naturally). You can optionally specify a palette:
-
-**VS Code Themes:**
-- Dracula, Monokai, One Dark, Nord, Tokyo Night
-- Night Owl, Cobalt2, Synthwave '84, Palenight
-- Ayu Dark, Shades of Purple, Catppuccin Mocha, Rosé Pine
-- Solarized Dark/Light, Gruvbox Dark/Light
-
-**GitHub & Material:**
-- GitHub Dark, GitHub Light
-- Material Design
-
-**Custom Palettes:**
-Provide your own color scheme with hex codes
-
-View all palettes with descriptions:
 ```bash
-bun run sketch --list-palettes
-```
+# Create a minimalist shoe marketplace homepage with Nord colors
+bun run sketch "shoe marketplace" home --tuning minimal --palette nord
 
-## Design Styles (Tuning Presets)
+# Generate Material Design button variations
+bun run component ./button.png --style material --count 5
 
-- Creative & Artistic, Professional & Corporate
-- Minimalist & Clean, Vibrant & Energetic
-- Elegant & Sophisticated, Modern & Trendy
-- Playful & Fun, Dark Mode Focused
-- Brutalist & Raw, Luxury & Premium
-- Tech & Futuristic, Organic & Natural
-- Retro & Vintage, Editorial & Magazine-Style
-- Accessibility Focused
+# Design a mobile fitness app homepage with dark mode
+bun run sketch "fitness tracker" home --platform mobile --tuning dark
 
-View all tuning presets with descriptions:
-```bash
-bun run sketch --list-tuning
-```
-
-## Customization
-
-### Adding New Page Types
-
-Edit `src/prompt-templates.ts` and add to `PAGE_COMPONENTS`:
-
-```typescript
-mypage: {
-  name: "my custom page",
-  elements: [
-    "element 1 description",
-    "element 2 description",
-    // ...
-  ]
-}
-```
-
-### Modifying Design Styles
-
-Update the `DESIGN_STYLES` array in `src/prompt-templates.ts`:
-
-```typescript
-export const DESIGN_STYLES = [
-  "your custom style description",
-  // ...
-];
+# Create luxury e-commerce product pages
+bun run sketch "jewelry store" product --tuning luxe --palette rose-pine
 ```
 
 ## Requirements
 
-- [Bun](https://bun.sh) runtime
-- `gemini` CLI tool (must be available in PATH)
+- [Bun](https://bun.sh/) runtime
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) - Official Google Gemini CLI
+- [nanobanana](https://github.com/gemini-cli-extensions/nanobanana) - Gemini CLI extension for AI image generation
 
-## Project Structure
+### Installing nanobanana
 
-```
-.
-├── src/
-│   ├── index.ts              # CLI entry point
-│   └── prompt-templates.ts   # Prompt generation logic
-├── package.json
-└── README.md
-```
+1. **Install the Gemini CLI extension:**
+   ```bash
+   gemini extensions install https://github.com/gemini-cli-extensions/nanobanana
+   ```
 
-## Command-Line Options
+2. **Set up your API key:**
+   ```bash
+   export NANOBANANA_GEMINI_API_KEY="your-api-key-here"
+   # Or use one of these alternatives:
+   # export NANOBANANA_GOOGLE_API_KEY="your-api-key-here"
+   # export GEMINI_API_KEY="your-api-key-here"
+   # export GOOGLE_API_KEY="your-api-key-here"
+   ```
 
-- `--dry-run` - Preview prompts without executing (default: executes immediately)
-- `--count, -c <number>` - Number of variations (default: 5)
-- `--tuning, -t <preset>` - Design tuning preset or custom direction
-- `--palette <preset>` - Color palette (omit for AI-chosen colors)
-- `--platform, -p <preset>` - Target platform (website, mobile, tablet, etc.)
-- `--reference, -r <path>` - Reference image for visual inspiration
-- `--list-tuning` - List all tuning presets
-- `--list-palettes` - List all color palettes
-- `--list-platforms` - List all platform presets
+3. **Restart the Gemini CLI** to activate the `/generate` command
 
-## Tips
-
-- Use quotes around website types with spaces: `"hair salon"`
-- Executes immediately by default - use `--dry-run` to preview prompts first
-- Use `--count` to control how many variations to generate (default: 5)
-- Each variation gets a different layout approach for true variety
-- Lower count (1-3) for quick testing, higher count (10+) for extensive exploration
-- Omit `--palette` to let AI choose colors naturally
+For detailed authentication setup, see the [Gemini CLI authentication documentation](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/authentication.md).
 
 ## License
 
