@@ -344,7 +344,11 @@ async function interactiveMode(): Promise<SketchOptions> {
 }
 
 async function executeGeminiCommand(prompt: string): Promise<void> {
-  const proc = Bun.spawn(['gemini', '--yolo', prompt], {
+  // Use explicit model to avoid ClassifierStrategy routing bug
+  // See: https://github.com/google-gemini/gemini-cli/issues/12660
+  const model = process.env.SKETCH_GEMINI_MODEL || 'gemini-2.5-flash';
+
+  const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
     stdout: 'inherit',
     stderr: 'inherit',
     stdin: 'inherit',

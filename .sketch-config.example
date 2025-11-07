@@ -1,0 +1,12 @@
+# Sketch CLI Configuration
+# Copy this file to .sketch-config or .env to customize settings
+
+# Gemini Model Configuration
+# Default: gemini-2.5-flash
+# This setting ensures the Gemini CLI uses a specific model instead of auto-detection,
+# which helps avoid the ClassifierStrategy routing bug (GitHub issues #12660, #12697)
+SKETCH_GEMINI_MODEL=gemini-2.5-flash
+
+# Alternative models you can use:
+# SKETCH_GEMINI_MODEL=gemini-2.5-pro
+# SKETCH_GEMINI_MODEL=gemini-2.0-flash-exp
