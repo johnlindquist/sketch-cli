@@ -116,26 +116,6 @@ export const PRESENTATION_FORMATS = [
   "pixel-perfect web design mockup showing pure website interface"
 ];
 
-function generateTimestamp(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  return `${year}${month}${day}_${hours}${minutes}${seconds}`;
-}
-
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .trim();
-}
-
 export function buildPrompt(
   websiteType: string,
   pageType: keyof typeof PAGE_COMPONENTS,
@@ -271,3 +251,5 @@ function getRandomItems<T>(array: readonly T[], count: number): T[] {
 }
 
 export type PageType = keyof typeof PAGE_COMPONENTS;
+import { generateTimestamp } from './utils/time';
+import { slugify } from './utils/string';

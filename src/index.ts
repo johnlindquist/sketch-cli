@@ -5,6 +5,8 @@ import { buildPrompt, PAGE_COMPONENTS, type PageType } from './prompt-templates'
 import { TUNING_PRESETS, getTuningPromptModifier, listTuningPresets, type TuningPresetKey } from './tuning-presets';
 import { PLATFORM_PRESETS, getPlatformPromptModifier, listPlatformPresets, type PlatformPresetKey } from './platform-presets';
 import { COLOR_PALETTES, getPalettePromptModifier, listColorPalettes, type ColorPaletteKey } from './color-palettes';
+import { copyImageToWorkspace } from './utils/fs';
+import { ensureGeminiAvailable, executeGeminiCommand, GeminiCommandError } from './utils/gemini';
 
 interface SketchOptions {
   websiteType: string;
@@ -121,81 +123,110 @@ AVAILABLE PAGE TYPES:
 function parseArgs(): SketchOptions | null {
   const args = process.argv.slice(2);
 
-  // Check for list flags
-  if (args.includes('--list-tuning')) {
-    listTuningPresets();
-    return null;
-  }
-
-  if (args.includes('--list-palettes')) {
-    listColorPalettes();
-    return null;
-  }
-
-  if (args.includes('--list-platforms')) {
-    listPlatformPresets();
-    return null;
-  }
-
-  // Check for help
-  if (args.includes('--help') || args.includes('-h')) {
-    showHelp();
-    return null;
-  }
-
-  // Interactive mode if no args
   if (args.length === 0) {
     return { websiteType: '', pageType: 'home', interactive: true };
   }
 
-  // Parse flags
-  const dryRun = args.includes('--dry-run');
-  const sequential = args.includes('--sequential');
-
+  let dryRun = false;
+  let sequential = false;
   let tuning: string | undefined;
-  const tuningIndex = args.findIndex(arg => arg === '--tuning' || arg === '-t');
-  if (tuningIndex !== -1 && args[tuningIndex + 1]) {
-    tuning = args[tuningIndex + 1];
-  }
-
   let reference: string | undefined;
-  const referenceIndex = args.findIndex(arg => arg === '--reference' || arg === '-r');
-  if (referenceIndex !== -1 && args[referenceIndex + 1]) {
-    reference = args[referenceIndex + 1];
-  }
-
   let platform: string | undefined;
-  const platformIndex = args.findIndex(arg => arg === '--platform' || arg === '-p');
-  if (platformIndex !== -1 && args[platformIndex + 1]) {
-    platform = args[platformIndex + 1];
-  }
-
   let palette: string | undefined;
-  const paletteIndex = args.findIndex(arg => arg === '--palette');
-  if (paletteIndex !== -1 && args[paletteIndex + 1]) {
-    palette = args[paletteIndex + 1];
-  }
-
   let count: number | undefined;
-  const countIndex = args.findIndex(arg => arg === '--count' || arg === '-c');
-  if (countIndex !== -1 && args[countIndex + 1]) {
-    const parsedCount = parseInt(args[countIndex + 1], 10);
-    if (isNaN(parsedCount) || parsedCount < 1) {
-      console.error('❌ Error: --count must be a positive integer\n');
-      return null;
-    }
-    count = parsedCount;
-  }
+  const positionalArgs: string[] = [];
 
-  // Filter out flags to get positional arguments
-  const positionalArgs = args.filter(arg =>
-    !arg.startsWith('-') &&
-    arg !== tuning &&
-    arg !== reference &&
-    arg !== platform &&
-    arg !== palette &&
-    arg !== (count?.toString())
-  );
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i];
+
+    switch (arg) {
+      case '--list-tuning':
+        listTuningPresets();
+        return null;
+      case '--list-palettes':
+        listColorPalettes();
+        return null;
+      case '--list-platforms':
+        listPlatformPresets();
+        return null;
+      case '--help':
+      case '-h':
+        showHelp();
+        return null;
+      case '--dry-run':
+        dryRun = true;
+        break;
+      case '--sequential':
+        sequential = true;
+        break;
+      case '--tuning':
+      case '-t': {
+        const next = args[i + 1];
+        if (!next || next.startsWith('-')) {
+          console.error('❌ Error: --tuning requires a value\n');
+          return null;
+        }
+        tuning = next;
+        i++;
+        break;
+      }
+      case '--reference':
+      case '-r': {
+        const next = args[i + 1];
+        if (!next || next.startsWith('-')) {
+          console.error('❌ Error: --reference requires a path\n');
+          return null;
+        }
+        reference = next;
+        i++;
+        break;
+      }
+      case '--platform':
+      case '-p': {
+        const next = args[i + 1];
+        if (!next || next.startsWith('-')) {
+          console.error('❌ Error: --platform requires a value\n');
+          return null;
+        }
+        platform = next;
+        i++;
+        break;
+      }
+      case '--palette': {
+        const next = args[i + 1];
+        if (!next || next.startsWith('-')) {
+          console.error('❌ Error: --palette requires a value\n');
+          return null;
+        }
+        palette = next;
+        i++;
+        break;
+      }
+      case '--count':
+      case '-c': {
+        const next = args[i + 1];
+        const parsedCount = Number(next);
+        if (!next || Number.isNaN(parsedCount) || parsedCount < 1) {
+          console.error('❌ Error: --count must be a positive integer\n');
+          return null;
+        }
+        count = parsedCount;
+        i++;
+        break;
+      }
+      default: {
+        if (arg.startsWith('-')) {
+          console.error(`❌ Error: Unknown flag "${arg}"\n`);
+          showHelp();
+          return null;
+        }
+        positionalArgs.push(arg);
+      }
+    }
+
+    i++;
+  }
 
   if (positionalArgs.length < 2) {
     console.error('❌ Error: Both website-type and page-type are required\n');
@@ -353,72 +384,8 @@ async function interactiveMode(): Promise<SketchOptions> {
   };
 }
 
-async function executeGeminiCommand(prompt: string, captureOutput = false): Promise<string | void> {
-  // Use explicit model to avoid ClassifierStrategy routing bug
-  // See: https://github.com/google-gemini/gemini-cli/issues/12660
-  const model = process.env.SKETCH_GEMINI_MODEL || 'gemini-2.5-flash';
-  const stdinMode = 'pipe' as const; // Pipe stdin so Gemini CLI skips raw TTY mode (avoids intermittent setRawMode EIO)
-
-  if (captureOutput) {
-    const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
-      stdout: 'pipe',
-      stderr: 'inherit',
-      stdin: stdinMode,
-      env: {
-        ...process.env,
-        NANOBANANA_MODEL: 'gemini-3-pro-image-preview',
-      },
-    });
-
-    const output = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-
-    if (exitCode !== 0) {
-      console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
-      process.exit(exitCode);
-    }
-
-    return output.trim();
-  } else {
-    const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
-      stdout: 'inherit',
-      stderr: 'inherit',
-      stdin: stdinMode,
-    });
-
-    const exitCode = await proc.exited;
-
-    if (exitCode !== 0) {
-      console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
-      process.exit(exitCode);
-    }
-  }
-}
-
-async function copyImageToWorkspace(imagePath: string): Promise<string> {
-  const fs = await import('fs');
-  const path = await import('path');
-
-  // Create temp directory in workspace if it doesn't exist
-  const tempDir = path.resolve(process.cwd(), '.temp-images');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-
-  // Copy image to temp directory
-  const filename = path.basename(imagePath);
-  const destPath = path.join(tempDir, filename);
-
-  fs.copyFileSync(imagePath, destPath);
-
-  return destPath;
-}
-
-async function describeReferenceImage(imagePath: string): Promise<string> {
-  // Copy image to workspace for Gemini CLI access
-  const workspaceImagePath = await copyImageToWorkspace(imagePath);
-
-  console.log(`🔍 Analyzing reference image: ${imagePath}`);
+async function describeReferenceImage(workspaceImagePath: string, originalPath?: string): Promise<string> {
+  console.log(`🔍 Analyzing reference image: ${originalPath || workspaceImagePath}`);
   console.log(`📋 Copied to workspace: ${workspaceImagePath}\n`);
 
   const prompt = `Analyze this image in complete detail @${workspaceImagePath}
@@ -457,7 +424,10 @@ Provide a comprehensive description that captures:
 
 Be specific about colors (hex codes if identifiable), measurements, and visual relationships. This description will guide AI to create variations that preserve the reference's core design language.`;
 
-  const description = await executeGeminiCommand(prompt, true) as string;
+  const description = await executeGeminiCommand(prompt, {
+    captureOutput: true,
+    env: { NANOBANANA_MODEL: 'gemini-3-pro-image-preview' },
+  }) as string;
 
   console.log(`✅ Reference image analysis complete\n`);
   console.log(`${'─'.repeat(80)}`);
@@ -481,18 +451,27 @@ async function main() {
     : parsedOptions;
 
   const { websiteType, pageType, dryRun, tuning, reference, platform, palette, count, sequential } = options;
+  const requiresGemini = !dryRun;
 
-  // Copy reference image to workspace if provided
+  if (requiresGemini) {
+    await ensureGeminiAvailable();
+  }
+
+  // Copy reference image to workspace if provided (only when executing)
   let workspaceReferencePath: string | undefined;
   if (reference) {
-    workspaceReferencePath = await copyImageToWorkspace(reference);
-    console.log(`📋 Copied reference image to workspace: ${workspaceReferencePath}\n`);
+    if (requiresGemini) {
+      workspaceReferencePath = copyImageToWorkspace(reference);
+      console.log(`📋 Copied reference image to workspace: ${workspaceReferencePath}\n`);
+    } else {
+      workspaceReferencePath = reference;
+    }
   }
 
   // Get reference description if reference image is provided
   let referenceDescription: string | undefined;
-  if (reference && !dryRun) {
-    referenceDescription = await describeReferenceImage(reference);
+  if (reference && requiresGemini && workspaceReferencePath) {
+    referenceDescription = await describeReferenceImage(workspaceReferencePath, reference);
   }
 
   // Get modifiers if specified
@@ -557,6 +536,38 @@ async function main() {
       console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
     }
   } else {
+    const failedVariations: number[] = [];
+    let successCount = 0;
+
+    const recordResult = (variationNumber: number, succeeded: boolean) => {
+      if (succeeded) {
+        successCount += 1;
+      } else {
+        failedVariations.push(variationNumber);
+      }
+    };
+
+    const formatGeminiError = (error: unknown): string => {
+      if (error instanceof GeminiCommandError) {
+        return error.message;
+      }
+      if (error instanceof Error) {
+        return error.message;
+      }
+      return String(error);
+    };
+
+    const runVariation = async (prompt: string, variationNumber: number) => {
+      try {
+        await executeGeminiCommand(prompt);
+        recordResult(variationNumber, true);
+        console.log(`✅ Variation ${variationNumber} complete.\n`);
+      } catch (error) {
+        console.error(`❌ Variation ${variationNumber} failed: ${formatGeminiError(error)}\n`);
+        recordResult(variationNumber, false);
+      }
+    };
+
     const mode = sequential ? 'sequentially' : 'in parallel';
     const cooldownNote = hasCooldown ? ` (with ${cooldownMs}ms cooldown)` : '';
     console.log(`🚀 Generating ${variationCount} designs ${mode}${cooldownNote}...\n`);
@@ -573,7 +584,7 @@ async function main() {
         console.log(`${'─'.repeat(80)}\n`);
 
         console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
-        await executeGeminiCommand(prompt);
+        await runVariation(prompt, i);
 
         if (hasCooldown && i < variationCount) {
           console.log(`⏳ Waiting ${Math.ceil(cooldownMs / 1000)}s before starting the next variation to avoid Gemini rate limits...\n`);
@@ -604,7 +615,7 @@ async function main() {
         console.log(`🎨 Gemini requires a cooldown; staggering ${variationCount} variations with ${cooldownMs}ms between starts...\n`);
         for (let i = 0; i < prompts.length; i++) {
           console.log(`🎨 Generating variation ${i + 1}/${variationCount}...\n`);
-          await executeGeminiCommand(prompts[i]);
+          await runVariation(prompts[i], i + 1);
           const isLast = i === prompts.length - 1;
           if (!isLast) {
             console.log(`⏳ Waiting ${Math.ceil(cooldownMs / 1000)}s before starting the next variation...\n`);
@@ -613,11 +624,17 @@ async function main() {
         }
       } else {
         console.log(`🎨 Generating all ${variationCount} variations in parallel...\n`);
-        await Promise.all(prompts.map(prompt => executeGeminiCommand(prompt)));
+        await Promise.all(prompts.map((prompt, index) => runVariation(prompt, index + 1)));
       }
     }
 
-    console.log(`\n✨ All ${variationCount} variations generated successfully!`);
+    const failureCount = failedVariations.length;
+    if (failureCount === 0) {
+      console.log(`\n✨ All ${variationCount} variations generated successfully!`);
+    } else {
+      console.log(`\n⚠️  Generation finished with ${successCount} succeeded, ${failureCount} failed.`);
+      console.log(`   Failed variations: ${failedVariations.join(', ')}\n`);
+    }
 
     // Show equivalent CLI command if coming from interactive mode
     if (parsedOptions.interactive) {
