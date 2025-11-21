@@ -69,7 +69,7 @@ sequenceDiagram
     else Execute Mode (--execute)
         Note over User,FS: BENEFIT: Instant gratification<br/>End-to-end automation
         CLI->>User: Display prompt preview
-        CLI->>Gemini: gemini --yolo [prompt]
+        CLI->>Gemini: NANOBANANA_MODEL=gemini-3-pro-image-preview gemini --yolo [prompt]
         Note over Gemini: AI generates 5 design variations<br/>following all specifications
         Gemini->>FS: Save 5 design images<br/>with structured naming
         FS-->>User: website_page_platform_tuning_timestamp_v1-5.png

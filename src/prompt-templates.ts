@@ -143,7 +143,8 @@ export function buildPrompt(
   tuningModifier?: string,
   referenceImagePath?: string,
   platformModifier?: string,
-  paletteModifier?: string
+  paletteModifier?: string,
+  referenceDescription?: string
 ): string {
   const page = PAGE_COMPONENTS[pageType];
   const randomFormat = getRandomItems(PRESENTATION_FORMATS, 1)[0];
@@ -177,7 +178,23 @@ export function buildPrompt(
     : '';
 
   const referenceSection = referenceImagePath
-    ? `\n\nREFERENCE IMAGE FOR INSPIRATION:\nUse this image as visual inspiration for design style, color palette, layout approach, and overall aesthetic: ${referenceImagePath}\n`
+    ? `\n\nREFERENCE IMAGE (CRITICAL): @${referenceImagePath}
+
+MANDATORY: This reference image is your PRIMARY design guide. You MUST:
+- Follow the reference's overall layout structure and composition approach
+- Match the visual hierarchy and content organization shown in the reference
+- Adopt the same design language, UI patterns, and aesthetic sensibility
+- Mirror the spacing, density, and visual rhythm of the reference
+- Use similar typography scale, weight distribution, and text treatment
+- Apply comparable color usage patterns and visual accent strategies
+- Maintain the same level of visual complexity and detail
+- Preserve the reference's approach to imagery, graphics, and decorative elements
+- The reference image defines the CORE DESIGN DIRECTION for this page
+
+Your design should feel like a natural variation of the reference, not a completely different approach.
+Apply the specified design direction and color palette AS MODIFICATIONS to the reference's foundation, not as replacements for it.
+
+${referenceDescription ? `\n\nDETAILED REFERENCE ANALYSIS:\n${referenceDescription}\n\nUse this detailed analysis to understand and replicate the reference's design approach.` : ''}\n`
     : '';
 
   const layoutSection = `\n\nLAYOUT APPROACH FOR THIS VARIATION:\n${layoutApproach}\n`;

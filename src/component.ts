@@ -15,6 +15,7 @@ interface ComponentOptions {
   style?: string;
   palette?: string;
   count?: number;
+  sequential?: boolean;
   interactive?: boolean;
 }
 
@@ -34,6 +35,7 @@ ARGUMENTS:
 FLAGS:
   --dry-run               Show generated prompts without executing
   --count, -c <number>    Number of variations to generate (default: 5)
+  --sequential            Generate variations one at a time (default: parallel)
   --type, -t <value>      Component type (button, card, form, nav, modal, etc.)
   --description <text>    Custom component description
   --style, -s <value>     Variation style preset (material, ios, glassmorphism, etc.)
@@ -138,6 +140,7 @@ function parseArgs(): ComponentOptions | null {
 
   // Parse flags
   const dryRun = args.includes('--dry-run');
+  const sequential = args.includes('--sequential');
 
   let componentType: ComponentTypeKey | undefined;
   const typeIndex = args.findIndex(arg => arg === '--type' || arg === '-t');
@@ -206,7 +209,7 @@ function parseArgs(): ComponentOptions | null {
     return null;
   }
 
-  return { imagePath, componentType, description, dryRun, style, palette, count };
+  return { imagePath, componentType, description, dryRun, style, palette, count, sequential };
 }
 
 function listComponentTypes(): void {
@@ -324,6 +327,12 @@ async function interactiveMode(): Promise<ComponentOptions> {
     default: false,
   });
 
+  // Sequential or parallel?
+  const sequential = await confirm({
+    message: 'Generate variations sequentially (slower but less resource intensive)?',
+    default: false,
+  });
+
   return {
     imagePath,
     componentType,
@@ -332,6 +341,7 @@ async function interactiveMode(): Promise<ComponentOptions> {
     style,
     palette,
     count,
+    sequential,
   };
 }
 
@@ -341,7 +351,8 @@ function buildComponentPrompt(
   description: string | undefined,
   variationNumber: number,
   styleModifier?: string,
-  paletteModifier?: string
+  paletteModifier?: string,
+  referenceDescription?: string
 ): string {
   const timestamp = generateTimestamp();
   const componentTypeSlug = componentType || 'component';
@@ -367,11 +378,23 @@ function buildComponentPrompt(
 
   const uniqueId = `${componentTypeSlug}_v${variationNumber}_${timestamp}`;
 
-  return `/generate ${uniqueId} Create ONE single component design variation ${variationNumber} based on the reference image.
+  return `/generate ${uniqueId} Create ONE single component design variation ${variationNumber} based on the reference image @${imagePath}
 
-REFERENCE IMAGE: ${imagePath}
+CRITICAL: The reference image is your PRIMARY source of truth. You MUST:
+- Preserve the exact component structure, layout, and element positioning from the reference
+- Maintain the same component dimensions and aspect ratio
+- Keep identical text hierarchy, spacing, and alignment
+- Retain all interactive elements in their exact positions (buttons, inputs, icons, etc.)
+- Match the reference's content organization and information architecture
+- Only modify the visual styling (colors, typography, shadows, effects) according to the style/palette
+- The reference image defines WHAT to create; the style/palette defines HOW to style it
 
-Analyze the reference image to understand the component's purpose, structure, and current design.${componentInstructions}${styleSection}${paletteSection}
+Study the reference image carefully to understand:
+- Component purpose and user interaction patterns
+- Exact layout structure and element relationships
+- Content hierarchy and visual weight
+- Spacing, padding, and alignment systems
+- Which elements are clickable, readable, or decorative${referenceDescription ? `\n\nDETAILED REFERENCE ANALYSIS:\n${referenceDescription}\n\nUse this detailed analysis to understand and replicate the reference component's exact structure.` : ''}${componentInstructions}${styleSection}${paletteSection}
 
 FILE NAMING:
 Save this variation as: ${filename}
@@ -429,23 +452,116 @@ function slugify(text: string): string {
     .trim();
 }
 
-async function executeGeminiCommand(prompt: string): Promise<void> {
+async function executeGeminiCommand(prompt: string, captureOutput = false): Promise<string | void> {
   // Use explicit model to avoid ClassifierStrategy routing bug
   // See: https://github.com/google-gemini/gemini-cli/issues/12660
   const model = process.env.SKETCH_GEMINI_MODEL || 'gemini-2.5-flash';
 
-  const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
-    stdout: 'inherit',
-    stderr: 'inherit',
-    stdin: 'inherit',
-  });
+  if (captureOutput) {
+    const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
+      stdout: 'pipe',
+      stderr: 'inherit',
+      stdin: 'inherit',
+    });
 
-  const exitCode = await proc.exited;
+    const output = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
 
-  if (exitCode !== 0) {
-    console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
-    process.exit(exitCode);
+    if (exitCode !== 0) {
+      console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
+      process.exit(exitCode);
+    }
+
+    return output.trim();
+  } else {
+    const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
+      stdout: 'inherit',
+      stderr: 'inherit',
+      stdin: 'inherit',
+    });
+
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
+      process.exit(exitCode);
+    }
   }
+}
+
+async function copyImageToWorkspace(imagePath: string): Promise<string> {
+  const fs = await import('fs');
+  const path = await import('path');
+
+  // Create temp directory in workspace if it doesn't exist
+  const tempDir = path.resolve(process.cwd(), '.temp-images');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  // Copy image to temp directory
+  const filename = path.basename(imagePath);
+  const destPath = path.join(tempDir, filename);
+
+  fs.copyFileSync(imagePath, destPath);
+
+  return destPath;
+}
+
+async function describeReferenceImage(imagePath: string): Promise<string> {
+  // Copy image to workspace for Gemini CLI access
+  const workspaceImagePath = await copyImageToWorkspace(imagePath);
+
+  console.log(`🔍 Analyzing reference component image: ${imagePath}`);
+  console.log(`📋 Copied to workspace: ${workspaceImagePath}\n`);
+
+  const prompt = `Analyze this component image in complete detail @${workspaceImagePath}
+
+Provide a comprehensive description that captures:
+
+1. COMPONENT STRUCTURE:
+   - Component type and purpose
+   - Overall dimensions and aspect ratio
+   - Layout structure and element positioning
+   - Content hierarchy and visual weight
+
+2. INTERACTIVE ELEMENTS:
+   - All clickable elements (buttons, links, icons)
+   - Input fields and their styling
+   - Icons and their positions
+   - Labels and their relationship to controls
+
+3. VISUAL DESIGN:
+   - Exact color palette (hex codes if identifiable)
+   - Typography (font families, sizes, weights, line heights)
+   - Spacing system (padding, margins, gaps)
+   - Border radius, shadows, and effects
+
+4. DESIGN DETAILS:
+   - Background treatment
+   - Border styles and widths
+   - Text alignment and truncation
+   - Icon styles (outline, filled, etc.)
+   - States visible (default, hover, active, disabled)
+
+5. CONTENT DETAILS:
+   - Specific text content and labels
+   - Placeholder text in inputs
+   - Icon types and meanings
+   - Text hierarchy and emphasis
+
+Be extremely specific about measurements, colors, and positioning. This description will guide AI to recreate the component's exact structure while allowing style variations.`;
+
+  const description = await executeGeminiCommand(prompt, true) as string;
+
+  console.log(`✅ Reference component analysis complete\n`);
+  console.log(`${'─'.repeat(80)}`);
+  console.log('📝 Reference Component Description:');
+  console.log(`${'─'.repeat(80)}`);
+  console.log(description);
+  console.log(`${'─'.repeat(80)}\n`);
+
+  return description;
 }
 
 async function main() {
@@ -459,7 +575,17 @@ async function main() {
     ? await interactiveMode()
     : parsedOptions;
 
-  const { imagePath, componentType, description, dryRun, style, palette, count } = options;
+  const { imagePath, componentType, description, dryRun, style, palette, count, sequential } = options;
+
+  // Copy image to workspace for Gemini CLI access
+  const workspaceImagePath = await copyImageToWorkspace(imagePath);
+  console.log(`📋 Copied reference image to workspace: ${workspaceImagePath}\n`);
+
+  // Get reference description if not in dry run mode
+  let referenceDescription: string | undefined;
+  if (!dryRun) {
+    referenceDescription = await describeReferenceImage(imagePath);
+  }
 
   const styleModifier = style ? getVariationPromptModifier(style) : undefined;
   const paletteModifier = palette ? getPalettePromptModifier(palette) : undefined;
@@ -484,26 +610,13 @@ async function main() {
     console.log(`🎨 Palette: ${paletteName}`);
   }
 
-  // Show equivalent CLI command if coming from interactive mode
-  if (parsedOptions.interactive) {
-    const commandParts = ['bun run component', `"${imagePath}"`];
-    if (componentType) commandParts.push(`--type ${componentType}`);
-    if (description) commandParts.push(`--description "${description}"`);
-    if (style) commandParts.push(`--style "${style}"`);
-    if (palette) commandParts.push(`--palette "${palette}"`);
-    if (count) commandParts.push(`--count ${count}`);
-    if (dryRun) commandParts.push('--dry-run');
-
-    console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
-  }
-
   console.log();
 
   if (dryRun) {
     console.log('📋 Generated prompts (dry run - not executing):\n');
 
     for (let i = 1; i <= variationCount; i++) {
-      const prompt = buildComponentPrompt(imagePath, componentType, description, i, styleModifier, paletteModifier);
+      const prompt = buildComponentPrompt(workspaceImagePath, componentType, description, i, styleModifier, paletteModifier, referenceDescription);
 
       console.log(`${'─'.repeat(80)}`);
       console.log(`Variation ${i}/${variationCount}:`);
@@ -513,27 +626,78 @@ async function main() {
     }
 
     console.log('💡 Tip: Remove --dry-run to execute the gemini command automatically');
+
+    // Show equivalent CLI command if coming from interactive mode
+    if (parsedOptions.interactive) {
+      const commandParts = ['bun run component', `"${imagePath}"`];
+      if (componentType) commandParts.push(`--type ${componentType}`);
+      if (description) commandParts.push(`--description "${description}"`);
+      if (style) commandParts.push(`--style "${style}"`);
+      if (palette) commandParts.push(`--palette "${palette}"`);
+      if (count) commandParts.push(`--count ${count}`);
+      if (sequential) commandParts.push('--sequential');
+      if (dryRun) commandParts.push('--dry-run');
+
+      console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
+    }
   } else {
-    console.log('🚀 Generating component variations...\n');
+    const mode = sequential ? 'sequentially' : 'in parallel';
+    console.log(`🚀 Generating ${variationCount} component variation${variationCount > 1 ? 's' : ''} ${mode}...\n`);
 
-    for (let i = 1; i <= variationCount; i++) {
-      const prompt = buildComponentPrompt(imagePath, componentType, description, i, styleModifier, paletteModifier);
+    if (sequential) {
+      // Sequential execution (original behavior)
+      for (let i = 1; i <= variationCount; i++) {
+        const prompt = buildComponentPrompt(workspaceImagePath, componentType, description, i, styleModifier, paletteModifier, referenceDescription);
 
-      console.log(`${'─'.repeat(80)}`);
-      console.log(`📝 Variation ${i}/${variationCount} Prompt:`);
-      console.log(`${'─'.repeat(80)}`);
-      console.log(prompt);
-      console.log(`${'─'.repeat(80)}\n`);
+        console.log(`${'─'.repeat(80)}`);
+        console.log(`📝 Variation ${i}/${variationCount} Prompt:`);
+        console.log(`${'─'.repeat(80)}`);
+        console.log(prompt);
+        console.log(`${'─'.repeat(80)}\n`);
 
-      console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
-      await executeGeminiCommand(prompt);
+        console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
+        await executeGeminiCommand(prompt);
 
-      if (i < variationCount) {
-        console.log(`\n✅ Variation ${i} complete! Moving to next variation...\n`);
+        if (i < variationCount) {
+          console.log(`\n✅ Variation ${i} complete! Moving to next variation...\n`);
+        }
       }
+    } else {
+      // Parallel execution (new default)
+      const prompts = Array.from({ length: variationCount }, (_, i) => {
+        const variationNumber = i + 1;
+        return buildComponentPrompt(workspaceImagePath, componentType, description, variationNumber, styleModifier, paletteModifier, referenceDescription);
+      });
+
+      // Show all prompts
+      prompts.forEach((prompt, i) => {
+        console.log(`${'─'.repeat(80)}`);
+        console.log(`📝 Variation ${i + 1}/${variationCount} Prompt:`);
+        console.log(`${'─'.repeat(80)}`);
+        console.log(prompt);
+        console.log(`${'─'.repeat(80)}\n`);
+      });
+
+      console.log(`🎨 Generating all ${variationCount} variations in parallel...\n`);
+
+      // Execute all in parallel
+      await Promise.all(prompts.map(prompt => executeGeminiCommand(prompt)));
     }
 
     console.log(`\n✨ All ${variationCount} variations generated successfully!`);
+
+    // Show equivalent CLI command if coming from interactive mode
+    if (parsedOptions.interactive) {
+      const commandParts = ['bun run component', `"${imagePath}"`];
+      if (componentType) commandParts.push(`--type ${componentType}`);
+      if (description) commandParts.push(`--description "${description}"`);
+      if (style) commandParts.push(`--style "${style}"`);
+      if (palette) commandParts.push(`--palette "${palette}"`);
+      if (count) commandParts.push(`--count ${count}`);
+      if (sequential) commandParts.push('--sequential');
+
+      console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
+    }
   }
 }
 

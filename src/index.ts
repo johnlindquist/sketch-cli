@@ -15,6 +15,7 @@ interface SketchOptions {
   platform?: string;
   palette?: string;
   count?: number;
+  sequential?: boolean;
   interactive?: boolean;
 }
 
@@ -33,6 +34,7 @@ ARGUMENTS:
 FLAGS:
   --dry-run               Show generated prompts without executing (default: execute immediately)
   --count, -c <number>    Number of design variations to generate (default: 5)
+  --sequential            Generate variations one at a time (default: parallel)
   --tuning, -t <value>    Apply design tuning preset or custom direction
   --palette <value>       Apply color palette (dracula, monokai, nord, github-dark, etc.)
   --reference, -r <path>  Path to reference image for visual inspiration
@@ -148,6 +150,7 @@ function parseArgs(): SketchOptions | null {
 
   // Parse flags
   const dryRun = args.includes('--dry-run');
+  const sequential = args.includes('--sequential');
 
   let tuning: string | undefined;
   const tuningIndex = args.findIndex(arg => arg === '--tuning' || arg === '-t');
@@ -209,7 +212,7 @@ function parseArgs(): SketchOptions | null {
     return null;
   }
 
-  return { websiteType, pageType, dryRun, tuning, reference, platform, palette, count };
+  return { websiteType, pageType, dryRun, tuning, reference, platform, palette, count, sequential };
 }
 
 
@@ -331,6 +334,12 @@ async function interactiveMode(): Promise<SketchOptions> {
     default: false,
   });
 
+  // Sequential or parallel?
+  const sequential = await confirm({
+    message: 'Generate variations sequentially (slower but less resource intensive)?',
+    default: false,
+  });
+
   return {
     websiteType,
     pageType,
@@ -340,26 +349,123 @@ async function interactiveMode(): Promise<SketchOptions> {
     platform,
     palette,
     count,
+    sequential,
   };
 }
 
-async function executeGeminiCommand(prompt: string): Promise<void> {
+async function executeGeminiCommand(prompt: string, captureOutput = false): Promise<string | void> {
   // Use explicit model to avoid ClassifierStrategy routing bug
   // See: https://github.com/google-gemini/gemini-cli/issues/12660
   const model = process.env.SKETCH_GEMINI_MODEL || 'gemini-2.5-flash';
 
-  const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
-    stdout: 'inherit',
-    stderr: 'inherit',
-    stdin: 'inherit',
-  });
+  if (captureOutput) {
+    const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
+      stdout: 'pipe',
+      stderr: 'inherit',
+      stdin: 'inherit',
+      env: {
+        ...process.env,
+        NANOBANANA_MODEL: 'gemini-3-pro-image-preview',
+      },
+    });
 
-  const exitCode = await proc.exited;
+    const output = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
 
-  if (exitCode !== 0) {
-    console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
-    process.exit(exitCode);
+    if (exitCode !== 0) {
+      console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
+      process.exit(exitCode);
+    }
+
+    return output.trim();
+  } else {
+    const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
+      stdout: 'inherit',
+      stderr: 'inherit',
+      stdin: 'inherit',
+    });
+
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      console.error(`\n❌ Gemini command failed with exit code ${exitCode}`);
+      process.exit(exitCode);
+    }
   }
+}
+
+async function copyImageToWorkspace(imagePath: string): Promise<string> {
+  const fs = await import('fs');
+  const path = await import('path');
+
+  // Create temp directory in workspace if it doesn't exist
+  const tempDir = path.resolve(process.cwd(), '.temp-images');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  // Copy image to temp directory
+  const filename = path.basename(imagePath);
+  const destPath = path.join(tempDir, filename);
+
+  fs.copyFileSync(imagePath, destPath);
+
+  return destPath;
+}
+
+async function describeReferenceImage(imagePath: string): Promise<string> {
+  // Copy image to workspace for Gemini CLI access
+  const workspaceImagePath = await copyImageToWorkspace(imagePath);
+
+  console.log(`🔍 Analyzing reference image: ${imagePath}`);
+  console.log(`📋 Copied to workspace: ${workspaceImagePath}\n`);
+
+  const prompt = `Analyze this image in complete detail @${workspaceImagePath}
+
+Provide a comprehensive description that captures:
+
+1. LAYOUT & COMPOSITION:
+   - Overall layout structure and grid system
+   - Content organization and hierarchy
+   - Spacing, padding, and visual rhythm
+   - Element positioning and alignment
+
+2. VISUAL DESIGN:
+   - Color palette (specific colors used)
+   - Typography (font styles, sizes, weights)
+   - Visual style and aesthetic (modern, minimal, bold, etc.)
+   - Design patterns and UI conventions used
+
+3. UI ELEMENTS:
+   - All interactive elements (buttons, links, forms, etc.)
+   - Navigation structure
+   - Content sections and their relationships
+   - Icons, imagery, and graphics
+
+4. DESIGN DETAILS:
+   - Shadows, borders, and effects
+   - Corner radius and shapes
+   - Visual accents and highlights
+   - Texture or background treatments
+
+5. CONTENT STRUCTURE:
+   - Text hierarchy and readability
+   - Image placement and treatment
+   - Call-to-action emphasis
+   - Information density
+
+Be specific about colors (hex codes if identifiable), measurements, and visual relationships. This description will guide AI to create variations that preserve the reference's core design language.`;
+
+  const description = await executeGeminiCommand(prompt, true) as string;
+
+  console.log(`✅ Reference image analysis complete\n`);
+  console.log(`${'─'.repeat(80)}`);
+  console.log('📝 Reference Image Description:');
+  console.log(`${'─'.repeat(80)}`);
+  console.log(description);
+  console.log(`${'─'.repeat(80)}\n`);
+
+  return description;
 }
 
 async function main() {
@@ -373,7 +479,20 @@ async function main() {
     ? await interactiveMode()
     : parsedOptions;
 
-  const { websiteType, pageType, dryRun, tuning, reference, platform, palette, count } = options;
+  const { websiteType, pageType, dryRun, tuning, reference, platform, palette, count, sequential } = options;
+
+  // Copy reference image to workspace if provided
+  let workspaceReferencePath: string | undefined;
+  if (reference) {
+    workspaceReferencePath = await copyImageToWorkspace(reference);
+    console.log(`📋 Copied reference image to workspace: ${workspaceReferencePath}\n`);
+  }
+
+  // Get reference description if reference image is provided
+  let referenceDescription: string | undefined;
+  if (reference && !dryRun) {
+    referenceDescription = await describeReferenceImage(reference);
+  }
 
   // Get modifiers if specified
   const tuningModifier = tuning ? getTuningPromptModifier(tuning) : undefined;
@@ -404,26 +523,13 @@ async function main() {
     console.log(`🖼️  Reference: ${reference}`);
   }
 
-  // Show equivalent CLI command if coming from interactive mode
-  if (parsedOptions.interactive) {
-    const commandParts = ['bun run sketch', `"${websiteType}"`, pageType];
-    if (platform) commandParts.push(`--platform "${platform}"`);
-    if (tuning) commandParts.push(`--tuning "${tuning}"`);
-    if (palette) commandParts.push(`--palette "${palette}"`);
-    if (reference) commandParts.push(`--reference "${reference}"`);
-    if (count) commandParts.push(`--count ${count}`);
-    if (dryRun) commandParts.push('--dry-run');
-
-    console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
-  }
-
   console.log();
 
   if (dryRun) {
     console.log('📋 Generated prompts (dry run - not executing):\n');
 
     for (let i = 1; i <= variationCount; i++) {
-      const prompt = buildPrompt(websiteType, pageType, i, tuningModifier, reference, platformModifier, paletteModifier);
+      const prompt = buildPrompt(websiteType, pageType, i, tuningModifier, workspaceReferencePath, platformModifier, paletteModifier, referenceDescription);
 
       console.log(`${'─'.repeat(80)}`);
       console.log(`Variation ${i}/${variationCount}:`);
@@ -433,27 +539,78 @@ async function main() {
     }
 
     console.log('💡 Tip: Remove --dry-run to execute the gemini command automatically');
+
+    // Show equivalent CLI command if coming from interactive mode
+    if (parsedOptions.interactive) {
+      const commandParts = ['bun run sketch', `"${websiteType}"`, pageType];
+      if (platform) commandParts.push(`--platform "${platform}"`);
+      if (tuning) commandParts.push(`--tuning "${tuning}"`);
+      if (palette) commandParts.push(`--palette "${palette}"`);
+      if (reference) commandParts.push(`--reference "${reference}"`);
+      if (count) commandParts.push(`--count ${count}`);
+      if (sequential) commandParts.push('--sequential');
+      if (dryRun) commandParts.push('--dry-run');
+
+      console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
+    }
   } else {
-    console.log('🚀 Generating designs...\n');
+    const mode = sequential ? 'sequentially' : 'in parallel';
+    console.log(`🚀 Generating ${variationCount} designs ${mode}...\n`);
 
-    for (let i = 1; i <= variationCount; i++) {
-      const prompt = buildPrompt(websiteType, pageType, i, tuningModifier, reference, platformModifier, paletteModifier);
+    if (sequential) {
+      // Sequential execution (original behavior)
+      for (let i = 1; i <= variationCount; i++) {
+        const prompt = buildPrompt(websiteType, pageType, i, tuningModifier, workspaceReferencePath, platformModifier, paletteModifier, referenceDescription);
 
-      console.log(`${'─'.repeat(80)}`);
-      console.log(`📝 Variation ${i}/${variationCount} Prompt:`);
-      console.log(`${'─'.repeat(80)}`);
-      console.log(prompt);
-      console.log(`${'─'.repeat(80)}\n`);
+        console.log(`${'─'.repeat(80)}`);
+        console.log(`📝 Variation ${i}/${variationCount} Prompt:`);
+        console.log(`${'─'.repeat(80)}`);
+        console.log(prompt);
+        console.log(`${'─'.repeat(80)}\n`);
 
-      console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
-      await executeGeminiCommand(prompt);
+        console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
+        await executeGeminiCommand(prompt);
 
-      if (i < variationCount) {
-        console.log(`\n✅ Variation ${i} complete! Moving to next variation...\n`);
+        if (i < variationCount) {
+          console.log(`\n✅ Variation ${i} complete! Moving to next variation...\n`);
+        }
       }
+    } else {
+      // Parallel execution (new default)
+      const prompts = Array.from({ length: variationCount }, (_, i) => {
+        const variationNumber = i + 1;
+        return buildPrompt(websiteType, pageType, variationNumber, tuningModifier, workspaceReferencePath, platformModifier, paletteModifier, referenceDescription);
+      });
+
+      // Show all prompts
+      prompts.forEach((prompt, i) => {
+        console.log(`${'─'.repeat(80)}`);
+        console.log(`📝 Variation ${i + 1}/${variationCount} Prompt:`);
+        console.log(`${'─'.repeat(80)}`);
+        console.log(prompt);
+        console.log(`${'─'.repeat(80)}\n`);
+      });
+
+      console.log(`🎨 Generating all ${variationCount} variations in parallel...\n`);
+
+      // Execute all in parallel
+      await Promise.all(prompts.map(prompt => executeGeminiCommand(prompt)));
     }
 
     console.log(`\n✨ All ${variationCount} variations generated successfully!`);
+
+    // Show equivalent CLI command if coming from interactive mode
+    if (parsedOptions.interactive) {
+      const commandParts = ['bun run sketch', `"${websiteType}"`, pageType];
+      if (platform) commandParts.push(`--platform "${platform}"`);
+      if (tuning) commandParts.push(`--tuning "${tuning}"`);
+      if (palette) commandParts.push(`--palette "${palette}"`);
+      if (reference) commandParts.push(`--reference "${reference}"`);
+      if (count) commandParts.push(`--count ${count}`);
+      if (sequential) commandParts.push('--sequential');
+
+      console.log(`\n💡 To run this again without interactive prompts, use:\n   ${commandParts.join(' ')}`);
+    }
   }
 }
 

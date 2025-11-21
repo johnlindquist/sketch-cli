@@ -69,7 +69,7 @@ sequenceDiagram
         else Execute Mode
             Note over User,FS: BENEFIT: Automated generation<br/>of multiple variations
             CLI->>User: Display prompt preview
-            CLI->>Gemini: gemini --yolo [prompt]
+            CLI->>Gemini:NANOBANANA_MODEL=gemini-3-pro-image-preview gemini --yolo [prompt]
             Note over Gemini: AI generates component variation<br/>following style and palette
             Gemini->>FS: Save component variation image<br/>with structured naming
             FS-->>User: componentType_style_timestamp_v#.png

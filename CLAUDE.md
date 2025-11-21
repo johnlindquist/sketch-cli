@@ -47,7 +47,7 @@ Both entry points follow the same pattern:
 1. Parse CLI arguments OR enter interactive mode
 2. Gather user inputs (website type, page type, design preferences, etc.)
 3. Build detailed AI prompts using template builders
-4. Execute prompts via Gemini CLI (`gemini -m <model> --yolo <prompt>`)
+4. Execute prompts via Gemini CLI (`NANOBANANA_MODEL=gemini-3-pro-image-previewgemini -m <model> --yolo <prompt>`)
 
 The `executeGeminiCommand()` function in both files handles the Gemini CLI invocation with automatic model selection.
 
