@@ -456,12 +456,17 @@ async function executeGeminiCommand(prompt: string, captureOutput = false): Prom
   // Use explicit model to avoid ClassifierStrategy routing bug
   // See: https://github.com/google-gemini/gemini-cli/issues/12660
   const model = process.env.SKETCH_GEMINI_MODEL || 'gemini-2.5-flash';
+  const stdinMode = 'pipe' as const; // Pipe stdin so Gemini CLI skips raw TTY mode (avoids intermittent setRawMode EIO)
 
   if (captureOutput) {
     const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
       stdout: 'pipe',
       stderr: 'inherit',
-      stdin: 'inherit',
+      stdin: stdinMode,
+      env: {
+        ...process.env,
+        NANOBANANA_MODEL: 'gemini-3-pro-image-preview',
+      },
     });
 
     const output = await new Response(proc.stdout).text();
@@ -477,7 +482,7 @@ async function executeGeminiCommand(prompt: string, captureOutput = false): Prom
     const proc = Bun.spawn(['gemini', '-m', model, '--yolo', prompt], {
       stdout: 'inherit',
       stderr: 'inherit',
-      stdin: 'inherit',
+      stdin: stdinMode,
     });
 
     const exitCode = await proc.exited;
@@ -590,6 +595,8 @@ async function main() {
   const styleModifier = style ? getVariationPromptModifier(style) : undefined;
   const paletteModifier = palette ? getPalettePromptModifier(palette) : undefined;
   const variationCount = count || 5;
+  const cooldownMs = Number(process.env.SKETCH_GEMINI_COOLDOWN_MS || '6000');
+  const hasCooldown = variationCount > 1 && cooldownMs > 0;
 
   console.log(`\n🎨 Generating ${variationCount} variation${variationCount > 1 ? 's' : ''} from: ${imagePath}`);
   if (componentType) {
@@ -642,7 +649,8 @@ async function main() {
     }
   } else {
     const mode = sequential ? 'sequentially' : 'in parallel';
-    console.log(`🚀 Generating ${variationCount} component variation${variationCount > 1 ? 's' : ''} ${mode}...\n`);
+    const cooldownNote = hasCooldown ? ` (with ${cooldownMs}ms cooldown)` : '';
+    console.log(`🚀 Generating ${variationCount} component variation${variationCount > 1 ? 's' : ''} ${mode}${cooldownNote}...\n`);
 
     if (sequential) {
       // Sequential execution (original behavior)
@@ -657,6 +665,11 @@ async function main() {
 
         console.log(`🎨 Generating variation ${i}/${variationCount}...\n`);
         await executeGeminiCommand(prompt);
+
+        if (hasCooldown && i < variationCount) {
+          console.log(`⏳ Waiting ${Math.ceil(cooldownMs / 1000)}s before starting the next variation to avoid Gemini rate limits...\n`);
+          await Bun.sleep(cooldownMs);
+        }
 
         if (i < variationCount) {
           console.log(`\n✅ Variation ${i} complete! Moving to next variation...\n`);
@@ -678,10 +691,21 @@ async function main() {
         console.log(`${'─'.repeat(80)}\n`);
       });
 
-      console.log(`🎨 Generating all ${variationCount} variations in parallel...\n`);
-
-      // Execute all in parallel
-      await Promise.all(prompts.map(prompt => executeGeminiCommand(prompt)));
+      if (hasCooldown) {
+        console.log(`🎨 Gemini requires a cooldown; staggering ${variationCount} variations with ${cooldownMs}ms between starts...\n`);
+        for (let i = 0; i < prompts.length; i++) {
+          console.log(`🎨 Generating variation ${i + 1}/${variationCount}...\n`);
+          await executeGeminiCommand(prompts[i]);
+          const isLast = i === prompts.length - 1;
+          if (!isLast) {
+            console.log(`⏳ Waiting ${Math.ceil(cooldownMs / 1000)}s before starting the next variation...\n`);
+            await Bun.sleep(cooldownMs);
+          }
+        }
+      } else {
+        console.log(`🎨 Generating all ${variationCount} variations in parallel...\n`);
+        await Promise.all(prompts.map(prompt => executeGeminiCommand(prompt)));
+      }
     }
 
     console.log(`\n✨ All ${variationCount} variations generated successfully!`);
